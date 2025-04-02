@@ -234,7 +234,9 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
             'Click the microphone button to start recording your voice.')}
       </p>
 
-      <style jsx>{`
+      {/* Remove the jsx attribute from the style tag */}
+      <style>
+        {`
         .waveform-container {
           display: flex;
           align-items: flex-end;
@@ -261,7 +263,8 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
           50% { opacity: 0.5; }
           100% { opacity: 1; }
         }
-      `}</style>
+        `}
+      </style>
     </div>
   );
 };
