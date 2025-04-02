@@ -17,6 +17,7 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   const [audioURL, setAudioURL] = useState<string | null>(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [waveformData, setWaveformData] = useState<number[]>(Array(30).fill(0));
+  const [permissionDenied, setPermissionDenied] = useState(false);
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -24,6 +25,7 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
   
   const formatTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
@@ -33,6 +35,7 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   
   useEffect(() => {
     return () => {
+      // Clean up function for component unmount
       if (mediaRecorderRef.current && isRecording) {
         mediaRecorderRef.current.stop();
       }
@@ -48,6 +51,10 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
       if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
         audioContextRef.current.close();
       }
+
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
     };
   }, [isRecording]);
 
@@ -61,17 +68,22 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   
   const startRecording = async () => {
     try {
+      console.log("Requesting microphone access...");
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
+      console.log("Microphone access granted", stream);
       
-      audioContextRef.current = new AudioContext();
+      streamRef.current = stream;
+      setPermissionDenied(false);
+      
+      // Create audio context and analyzer
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
       analyserRef.current = audioContextRef.current.createAnalyser();
       const source = audioContextRef.current.createMediaStreamSource(stream);
       analyserRef.current.fftSize = 256;
       source.connect(analyserRef.current);
       
       const updateWaveform = () => {
-        if (!analyserRef.current) return;
+        if (!analyserRef.current || !isRecording) return;
         
         const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
         analyserRef.current.getByteFrequencyData(dataArray);
@@ -82,55 +94,110 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
         });
         
         setWaveformData(newWaveformData);
-        requestAnimationFrame(updateWaveform);
+        animationFrameRef.current = requestAnimationFrame(updateWaveform);
       };
       
+      // Start updating waveform
       updateWaveform();
       
-      mediaRecorderRef.current = new MediaRecorder(stream);
+      // Initialize media recorder with supported mime type
+      const mimeType = getSupportedMimeType();
+      console.log("Using MIME type:", mimeType);
+      
+      mediaRecorderRef.current = new MediaRecorder(stream, { mimeType });
       audioChunksRef.current = [];
       
       mediaRecorderRef.current.ondataavailable = (e) => {
-        audioChunksRef.current.push(e.data);
+        console.log("Data available event:", e.data.size);
+        if (e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
       };
       
       mediaRecorderRef.current.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
-        const audioUrl = URL.createObjectURL(audioBlob);
-        setAudioURL(audioUrl);
-        
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach(track => track.stop());
-        }
-        
-        if (onAnalyze) {
-          onAnalyze(audioBlob);
+        console.log("MediaRecorder stopped, chunks:", audioChunksRef.current.length);
+        if (audioChunksRef.current.length > 0) {
+          const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+          console.log("Created audio blob:", audioBlob.size);
+          
+          const audioUrl = URL.createObjectURL(audioBlob);
+          setAudioURL(audioUrl);
+          
+          if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+          }
+          
+          if (onAnalyze && audioBlob.size > 0) {
+            console.log("Calling onAnalyze with blob:", audioBlob.size);
+            onAnalyze(audioBlob);
+          }
+        } else {
+          console.error("No audio data recorded");
+          toast.error("No audio data was recorded. Please try again.");
         }
       };
       
-      mediaRecorderRef.current.start();
+      // Start recording
+      mediaRecorderRef.current.start(100); // Collect data every 100ms
+      console.log("MediaRecorder started");
       setIsRecording(true);
       setAudioURL(null);
       setRecordingDuration(0);
       
+      // Start timer
       timerRef.current = window.setInterval(() => {
         setRecordingDuration(prev => prev + 1);
       }, 1000);
       
     } catch (error) {
       console.error('Error accessing microphone:', error);
+      setPermissionDenied(true);
       toast.error('Could not access microphone. Please check permissions and try again.');
     }
   };
   
+  // Get supported MIME type for audio recording
+  const getSupportedMimeType = (): string => {
+    const types = [
+      'audio/webm',
+      'audio/webm;codecs=opus',
+      'audio/ogg;codecs=opus',
+      'audio/mp4',
+      'audio/wav'
+    ];
+    
+    for (const type of types) {
+      if (MediaRecorder.isTypeSupported(type)) {
+        return type;
+      }
+    }
+    
+    return 'audio/webm'; // Fallback
+  };
+  
   const stopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
+      console.log("Stopping recording...");
+      try {
+        // Ensure we're collecting any final chunks
+        mediaRecorderRef.current.requestData();
+        // Stop the recorder
+        mediaRecorderRef.current.stop();
+        console.log("MediaRecorder stopped");
+      } catch (err) {
+        console.error("Error stopping MediaRecorder:", err);
+      }
+      
       setIsRecording(false);
       
       if (timerRef.current) {
         window.clearInterval(timerRef.current);
         timerRef.current = null;
+      }
+      
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
       }
     }
   };
@@ -145,8 +212,9 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   };
   
   const analyzeRecording = () => {
-    if (audioURL && onAnalyze) {
-      const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+    if (audioURL && onAnalyze && audioChunksRef.current.length > 0) {
+      const mimeType = getSupportedMimeType();
+      const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
       onAnalyze(audioBlob);
       toast.success('Analyzing your voice...');
     }
@@ -231,10 +299,10 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
       <p className="text-sm text-muted-foreground text-center">
         {isRecording ? `Recording in progress (max ${maxRecordingTime}s)...` : 
           (audioURL ? 'Your recording is ready for analysis or download.' : 
+            permissionDenied ? 'Please allow microphone access to record your voice.' :
             'Click the microphone button to start recording your voice.')}
       </p>
 
-      {/* Remove the jsx attribute from the style tag */}
       <style>
         {`
         .waveform-container {
