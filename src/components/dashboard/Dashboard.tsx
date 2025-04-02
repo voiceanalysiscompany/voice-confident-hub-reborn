@@ -1,11 +1,10 @@
-
 import React, { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import VoiceRecorder from '@/components/VoiceRecorder';
 import AnalysisHistory from '@/components/dashboard/AnalysisHistory';
 import { Mic, BarChart2, History } from 'lucide-react';
-import { toast } from '@/components/ui/sonner';
+import { toast } from "sonner";
 
 const Dashboard = () => {
   const [activeTab, setActiveTab] = useState("record");

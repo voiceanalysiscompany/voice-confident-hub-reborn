@@ -1,11 +1,10 @@
-
 import React, { useState } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { toast } from '@/components/ui/sonner';
+import { toast } from "sonner";
 
 const AuthForm = () => {
   const [searchParams] = useSearchParams();

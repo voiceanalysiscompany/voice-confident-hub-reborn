@@ -1,8 +1,7 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Mic, StopCircle, Play, Download } from 'lucide-react';
-import { toast } from '@/components/ui/sonner';
+import { toast } from "sonner";
 
 interface VoiceRecorderProps {
   onAnalyze?: (audioBlob: Blob) => void;
@@ -21,7 +20,6 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ onAnalyze }) => {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   
-  // Format seconds to mm:ss
   const formatTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
@@ -29,7 +27,6 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ onAnalyze }) => {
   };
   
   useEffect(() => {
-    // Cleanup function to stop recording and release resources
     return () => {
       if (mediaRecorderRef.current && isRecording) {
         mediaRecorderRef.current.stop();
@@ -54,24 +51,21 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ onAnalyze }) => {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       
-      // Set up audio context and analyser for visualizations
       audioContextRef.current = new AudioContext();
       analyserRef.current = audioContextRef.current.createAnalyser();
       const source = audioContextRef.current.createMediaStreamSource(stream);
       analyserRef.current.fftSize = 256;
       source.connect(analyserRef.current);
       
-      // Start visualization loop
       const updateWaveform = () => {
         if (!analyserRef.current) return;
         
         const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
         analyserRef.current.getByteFrequencyData(dataArray);
         
-        // Convert the frequency data to something usable for our visualization
         const newWaveformData = Array.from({ length: 30 }, (_, i) => {
           const index = Math.floor(i * dataArray.length / 30);
-          return dataArray[index] / 255; // Normalize to 0-1
+          return dataArray[index] / 255;
         });
         
         setWaveformData(newWaveformData);
@@ -80,7 +74,6 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ onAnalyze }) => {
       
       updateWaveform();
       
-      // Set up media recorder
       mediaRecorderRef.current = new MediaRecorder(stream);
       audioChunksRef.current = [];
       
@@ -93,7 +86,6 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ onAnalyze }) => {
         const audioUrl = URL.createObjectURL(audioBlob);
         setAudioURL(audioUrl);
         
-        // Release the microphone
         if (streamRef.current) {
           streamRef.current.getTracks().forEach(track => track.stop());
         }
@@ -108,7 +100,6 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ onAnalyze }) => {
       setAudioURL(null);
       setRecordingDuration(0);
       
-      // Set up the timer
       timerRef.current = window.setInterval(() => {
         setRecordingDuration(prev => prev + 1);
       }, 1000);
