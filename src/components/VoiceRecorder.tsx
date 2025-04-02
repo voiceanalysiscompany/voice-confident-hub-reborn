@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Mic, StopCircle, Play, Download } from 'lucide-react';
@@ -5,9 +6,13 @@ import { toast } from "sonner";
 
 interface VoiceRecorderProps {
   onAnalyze?: (audioBlob: Blob) => void;
+  maxRecordingTime?: number;
 }
 
-const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ onAnalyze }) => {
+const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ 
+  onAnalyze,
+  maxRecordingTime = 12 // Default maximum recording time in seconds
+}) => {
   const [isRecording, setIsRecording] = useState(false);
   const [audioURL, setAudioURL] = useState<string | null>(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
@@ -45,6 +50,14 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ onAnalyze }) => {
       }
     };
   }, [isRecording]);
+
+  // Effect to stop recording when maximum time is reached
+  useEffect(() => {
+    if (isRecording && recordingDuration >= maxRecordingTime) {
+      stopRecording();
+      toast.info(`Maximum recording time of ${maxRecordingTime} seconds reached.`);
+    }
+  }, [isRecording, recordingDuration, maxRecordingTime]);
   
   const startRecording = async () => {
     try {
@@ -154,7 +167,14 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ onAnalyze }) => {
       </div>
       
       <div className="text-2xl font-bold mb-6">
-        {isRecording ? formatTime(recordingDuration) : (audioURL ? 'Recording Complete' : 'Ready to Record')}
+        {isRecording 
+          ? (
+            <div className="flex items-center gap-2">
+              <span className="recording-indicator"></span>
+              {formatTime(recordingDuration)} / {formatTime(maxRecordingTime)}
+            </div>
+          ) 
+          : (audioURL ? 'Recording Complete' : 'Ready to Record')}
       </div>
       
       <div className="flex gap-4 mb-6">
@@ -209,10 +229,39 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ onAnalyze }) => {
       </div>
       
       <p className="text-sm text-muted-foreground text-center">
-        {isRecording ? 'Recording in progress...' : 
+        {isRecording ? `Recording in progress (max ${maxRecordingTime}s)...` : 
           (audioURL ? 'Your recording is ready for analysis or download.' : 
             'Click the microphone button to start recording your voice.')}
       </p>
+
+      <style jsx>{`
+        .waveform-container {
+          display: flex;
+          align-items: flex-end;
+          justify-content: space-between;
+          height: 100px;
+          gap: 2px;
+        }
+        .voice-bar {
+          flex: 1;
+          background: linear-gradient(to top, #4f46e5, #818cf8);
+          border-radius: 2px;
+          transition: height 0.1s ease;
+        }
+        .recording-indicator {
+          display: inline-block;
+          width: 12px;
+          height: 12px;
+          background-color: #ef4444;
+          border-radius: 50%;
+          animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+          0% { opacity: 1; }
+          50% { opacity: 0.5; }
+          100% { opacity: 1; }
+        }
+      `}</style>
     </div>
   );
 };

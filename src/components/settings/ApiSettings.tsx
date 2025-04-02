@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -6,6 +7,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { InfoIcon } from 'lucide-react';
+import { setElevenLabsApiKey, getElevenLabsApiKey } from '@/services/elevenLabsService';
 
 const ApiSettings = () => {
   const [isLoading, setIsLoading] = useState(false);
@@ -16,6 +18,14 @@ const ApiSettings = () => {
     useAdvancedVoiceAnalysis: true,
     shareFeedbackData: false
   });
+
+  useEffect(() => {
+    // Load saved API key if available
+    const savedKey = getElevenLabsApiKey();
+    if (savedKey) {
+      setFormData(prev => ({ ...prev, elevenLabsApiKey: savedKey }));
+    }
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -33,6 +43,10 @@ const ApiSettings = () => {
     try {
       // In a real app, this would save the API settings to your backend
       await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Save the ElevenLabs API key to our service
+      setElevenLabsApiKey(formData.elevenLabsApiKey);
+      
       toast.success('Settings saved successfully!');
     } catch (error) {
       toast.error('Failed to save settings. Please try again.');
@@ -62,6 +76,11 @@ const ApiSettings = () => {
     
     // In a real app, this would test the connection to the service
     await new Promise(resolve => setTimeout(resolve, 1500));
+    
+    if (service === 'elevenlabs') {
+      // Save the key temporarily for the test
+      setElevenLabsApiKey(key);
+    }
     
     // Simulate successful test
     toast.success(`Successfully connected to ${service}!`);

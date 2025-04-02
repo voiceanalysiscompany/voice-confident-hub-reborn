@@ -1,26 +1,40 @@
-import React, { useState } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import VoiceRecorder from '@/components/VoiceRecorder';
 import AnalysisHistory from '@/components/dashboard/AnalysisHistory';
 import { Mic, BarChart2, History } from 'lucide-react';
 import { toast } from "sonner";
+import { analyzeVoiceWithElevenLabs, VoiceAnalysisResponse, getElevenLabsApiKey } from '@/services/elevenLabsService';
 
 const Dashboard = () => {
   const [activeTab, setActiveTab] = useState("record");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<VoiceAnalysisResponse | null>(null);
+  const [hasApiKey, setHasApiKey] = useState(false);
   
-  // Mock function for analysis - in production this would call your API
+  useEffect(() => {
+    // Check if API key is set
+    setHasApiKey(!!getElevenLabsApiKey());
+  }, []);
+  
   const handleAnalyzeVoice = async (audioBlob: Blob) => {
+    if (!hasApiKey) {
+      toast.error("Please set your ElevenLabs API key in Settings first.");
+      return;
+    }
+    
     setIsAnalyzing(true);
+    setActiveTab("results");
     
     try {
-      // Simulate API call to ElevenLabs/TwelveLabs
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      const result = await analyzeVoiceWithElevenLabs(audioBlob);
       
-      // Mock successful analysis
-      toast.success("Voice analysis complete!");
-      setActiveTab("results");
+      if (result) {
+        setAnalysisResult(result);
+        toast.success("Voice analysis complete!");
+      }
     } catch (error) {
       console.error("Analysis error:", error);
       toast.error("Failed to analyze voice. Please try again.");
@@ -54,11 +68,11 @@ const Dashboard = () => {
             <CardHeader>
               <CardTitle>Record Your Voice</CardTitle>
               <CardDescription>
-                Record a sample of your voice to analyze for tone, pitch, clarity, and confidence.
+                Record a sample of your voice (up to 12 seconds) to analyze for tone, pitch, clarity, and confidence.
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <VoiceRecorder onAnalyze={handleAnalyzeVoice} />
+              <VoiceRecorder onAnalyze={handleAnalyzeVoice} maxRecordingTime={12} />
             </CardContent>
           </Card>
         </TabsContent>
@@ -89,15 +103,19 @@ const Dashboard = () => {
                   </div>
                   <p className="text-lg">Analyzing your voice...</p>
                 </div>
-              ) : (
+              ) : analysisResult ? (
                 <div className="space-y-6">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="bg-gray-50 p-4 rounded-lg">
                       <h3 className="font-semibold mb-2">Confidence Score</h3>
                       <div className="flex items-center">
-                        <div className="text-3xl font-bold text-brand-500">75%</div>
+                        <div className="text-3xl font-bold text-brand-500">{Math.round(analysisResult.confidence_score)}%</div>
                         <div className="ml-4 text-sm text-muted-foreground">
-                          Your voice projects confidence, but there's room for improvement in consistency.
+                          {analysisResult.confidence_score > 80 
+                            ? "Your voice projects strong confidence and authority."
+                            : analysisResult.confidence_score > 60
+                              ? "Your voice projects confidence, but there's room for improvement in consistency."
+                              : "Work on projecting more confidence in your voice."}
                         </div>
                       </div>
                     </div>
@@ -105,9 +123,13 @@ const Dashboard = () => {
                     <div className="bg-gray-50 p-4 rounded-lg">
                       <h3 className="font-semibold mb-2">Clarity Score</h3>
                       <div className="flex items-center">
-                        <div className="text-3xl font-bold text-accent1">82%</div>
+                        <div className="text-3xl font-bold text-accent1">{Math.round(analysisResult.clarity_score)}%</div>
                         <div className="ml-4 text-sm text-muted-foreground">
-                          Your enunciation is good, with minimal mumbling or unclear pronunciation.
+                          {analysisResult.clarity_score > 80 
+                            ? "Your enunciation is excellent, with clear and precise pronunciation."
+                            : analysisResult.clarity_score > 60
+                              ? "Your enunciation is good, with minimal mumbling or unclear pronunciation."
+                              : "Work on improving your enunciation for better clarity."}
                         </div>
                       </div>
                     </div>
@@ -115,32 +137,47 @@ const Dashboard = () => {
                   
                   <div className="bg-gray-50 p-4 rounded-lg">
                     <h3 className="font-semibold mb-2">Pitch Analysis</h3>
-                    <div className="h-40 bg-white rounded border flex items-center justify-center">
-                      <p className="text-muted-foreground">Pitch visualization will appear here</p>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm">Average: {Math.round(analysisResult.pitch_analysis.average)} Hz</span>
+                      <span className="text-sm">Variation: {Math.round(analysisResult.pitch_analysis.variation)}%</span>
+                    </div>
+                    <div className="h-40 bg-white rounded border p-2">
+                      <div className="h-full w-full relative flex items-end">
+                        <div className="absolute top-0 left-0 w-full h-full flex flex-col justify-between text-xs text-gray-400">
+                          <div>{analysisResult.pitch_analysis.range[1]} Hz</div>
+                          <div>{analysisResult.pitch_analysis.range[0]} Hz</div>
+                        </div>
+                        {Array.from({ length: 20 }).map((_, i) => {
+                          const height = 30 + Math.sin(i / 3) * 20 + Math.random() * 30;
+                          return (
+                            <div 
+                              key={i}
+                              className="bg-indigo-500 w-full mx-0.5"
+                              style={{ height: `${height}%`, opacity: 0.7 + Math.random() * 0.3 }}
+                            />
+                          )
+                        })}
+                      </div>
                     </div>
                   </div>
                   
                   <div className="bg-gray-50 p-4 rounded-lg">
                     <h3 className="font-semibold mb-2">Feedback & Recommendations</h3>
                     <ul className="space-y-2">
-                      <li className="flex">
-                        <span className="text-green-500 mr-2">✓</span>
-                        <span>Good pace and rhythm throughout most of the recording</span>
-                      </li>
-                      <li className="flex">
-                        <span className="text-green-500 mr-2">✓</span>
-                        <span>Strong, clear opening statement</span>
-                      </li>
-                      <li className="flex">
-                        <span className="text-yellow-500 mr-2">!</span>
-                        <span>Try varying your tone more to emphasize key points</span>
-                      </li>
-                      <li className="flex">
-                        <span className="text-yellow-500 mr-2">!</span>
-                        <span>Watch for trailing off at the end of sentences</span>
-                      </li>
+                      {analysisResult.recommendations.map((recommendation, index) => (
+                        <li key={index} className="flex">
+                          <span className={index < 2 ? "text-green-500 mr-2" : "text-yellow-500 mr-2"}>
+                            {index < 2 ? "✓" : "!"}
+                          </span>
+                          <span>{recommendation}</span>
+                        </li>
+                      ))}
                     </ul>
                   </div>
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <p className="text-muted-foreground">Record your voice first to see analysis results here</p>
                 </div>
               )}
             </CardContent>
