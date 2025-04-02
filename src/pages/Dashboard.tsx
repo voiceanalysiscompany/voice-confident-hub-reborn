@@ -1,21 +1,19 @@
 
 import React from 'react';
 import Navigation from '@/components/Navigation';
-import Hero from '@/components/Hero';
-import Features from '@/components/Features';
+import Dashboard from '@/components/dashboard/Dashboard';
 import Footer from '@/components/Footer';
 
-const Index = () => {
+const DashboardPage = () => {
   return (
     <div className="min-h-screen">
       <Navigation />
-      <main>
-        <Hero />
-        <Features />
-      </main>
+      <div className="pt-20">
+        <Dashboard />
+      </div>
       <Footer />
     </div>
   );
 };
 
-export default Index;
+export default DashboardPage;
