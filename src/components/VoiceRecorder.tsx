@@ -18,6 +18,7 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [waveformData, setWaveformData] = useState<number[]>(Array(30).fill(0));
   const [permissionDenied, setPermissionDenied] = useState(false);
+  const [recordingError, setRecordingError] = useState<string | null>(null);
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -33,34 +34,68 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
   
+  // Clean up resources when component unmounts
   useEffect(() => {
     return () => {
-      // Clean up function for component unmount
-      if (mediaRecorderRef.current && isRecording) {
-        mediaRecorderRef.current.stop();
-      }
-      
-      if (timerRef.current) {
-        window.clearInterval(timerRef.current);
-      }
-      
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-      
-      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-        audioContextRef.current.close();
-      }
-
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
+      console.log("Voice recorder component unmounting, cleaning up resources");
+      stopMediaRecording();
+      stopTimer();
+      stopStream();
+      closeAudioContext();
+      cancelAnimationFrame();
     };
-  }, [isRecording]);
+  }, []);
+
+  const stopMediaRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      try {
+        console.log("Stopping media recorder on cleanup");
+        mediaRecorderRef.current.stop();
+      } catch (err) {
+        console.error("Error stopping MediaRecorder during cleanup:", err);
+      }
+    }
+  };
+
+  const stopTimer = () => {
+    if (timerRef.current) {
+      console.log("Clearing timer on cleanup");
+      window.clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const stopStream = () => {
+    if (streamRef.current) {
+      console.log("Stopping media stream tracks on cleanup");
+      streamRef.current.getTracks().forEach(track => {
+        console.log(`Stopping track: ${track.kind}, enabled: ${track.enabled}, readyState: ${track.readyState}`);
+        track.stop();
+      });
+      streamRef.current = null;
+    }
+  };
+
+  const closeAudioContext = () => {
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      console.log(`Closing audio context, current state: ${audioContextRef.current.state}`);
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+  };
+
+  const cancelAnimationFrame = () => {
+    if (animationFrameRef.current) {
+      console.log("Canceling animation frame on cleanup");
+      window.cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+  };
 
   // Effect to stop recording when maximum time is reached
   useEffect(() => {
     if (isRecording && recordingDuration >= maxRecordingTime) {
+      console.log(`Maximum recording time of ${maxRecordingTime} seconds reached, stopping recording`);
       stopRecording();
       toast.info(`Maximum recording time of ${maxRecordingTime} seconds reached.`);
     }
@@ -68,15 +103,58 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   
   const startRecording = async () => {
     try {
+      setRecordingError(null);
       console.log("Requesting microphone access...");
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      // Reset recording state
+      setAudioURL(null);
+      setRecordingDuration(0);
+      setIsRecording(false);
+      audioChunksRef.current = [];
+      
+      // First, clean up any existing resources
+      stopMediaRecording();
+      stopTimer();
+      stopStream();
+      closeAudioContext();
+      cancelAnimationFrame();
+      
+      // Check if MediaRecorder is supported
+      if (!window.MediaRecorder) {
+        const error = "MediaRecorder API is not supported in this browser";
+        console.error(error);
+        setRecordingError(error);
+        toast.error(error);
+        return;
+      }
+      
+      // Request microphone access with explicit audio constraints
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+      
       console.log("Microphone access granted", stream);
+      console.log("Audio tracks:", stream.getAudioTracks().length);
+      console.log("Audio track settings:", stream.getAudioTracks()[0]?.getSettings());
       
       streamRef.current = stream;
       setPermissionDenied(false);
       
       // Create audio context and analyzer
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContext) {
+        const error = "AudioContext is not supported in this browser";
+        console.error(error);
+        setRecordingError(error);
+        toast.error(error);
+        return;
+      }
+      
+      audioContextRef.current = new AudioContext();
       analyserRef.current = audioContextRef.current.createAnalyser();
       const source = audioContextRef.current.createMediaStreamSource(stream);
       analyserRef.current.fftSize = 256;
@@ -98,61 +176,127 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
       };
       
       // Start updating waveform
-      updateWaveform();
+      animationFrameRef.current = requestAnimationFrame(updateWaveform);
       
       // Initialize media recorder with supported mime type
       const mimeType = getSupportedMimeType();
       console.log("Using MIME type:", mimeType);
       
-      mediaRecorderRef.current = new MediaRecorder(stream, { mimeType });
-      audioChunksRef.current = [];
-      
-      mediaRecorderRef.current.ondataavailable = (e) => {
-        console.log("Data available event:", e.data.size);
-        if (e.data.size > 0) {
-          audioChunksRef.current.push(e.data);
+      try {
+        mediaRecorderRef.current = new MediaRecorder(stream, { mimeType });
+        console.log("MediaRecorder created successfully");
+      } catch (err) {
+        console.error("Error creating MediaRecorder:", err);
+        // Try again with default options
+        try {
+          console.log("Trying to create MediaRecorder with default options");
+          mediaRecorderRef.current = new MediaRecorder(stream);
+          console.log("MediaRecorder created with default options");
+        } catch (fallbackErr) {
+          const error = `Failed to create MediaRecorder: ${fallbackErr}`;
+          console.error(error);
+          setRecordingError(error);
+          toast.error("Could not initialize audio recording. Please try a different browser.");
+          return;
         }
+      }
+      
+      // Set up MediaRecorder event handlers
+      mediaRecorderRef.current.ondataavailable = (e) => {
+        console.log("Data available event:", e.data.size, "bytes");
+        if (e.data && e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+          console.log("Audio chunk added, total chunks:", audioChunksRef.current.length);
+        } else {
+          console.warn("Received empty data in ondataavailable");
+        }
+      };
+      
+      mediaRecorderRef.current.onstart = () => {
+        console.log("MediaRecorder started successfully");
+        setIsRecording(true);
+      };
+      
+      mediaRecorderRef.current.onerror = (event) => {
+        console.error("MediaRecorder error:", event);
+        setRecordingError("Error during recording");
+        toast.error("Recording error occurred");
       };
       
       mediaRecorderRef.current.onstop = () => {
         console.log("MediaRecorder stopped, chunks:", audioChunksRef.current.length);
+        
         if (audioChunksRef.current.length > 0) {
+          const mimeType = getSupportedMimeType();
           const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
-          console.log("Created audio blob:", audioBlob.size);
+          console.log("Created audio blob:", audioBlob.size, "bytes");
           
-          const audioUrl = URL.createObjectURL(audioBlob);
-          setAudioURL(audioUrl);
-          
-          if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop());
-          }
-          
-          if (onAnalyze && audioBlob.size > 0) {
-            console.log("Calling onAnalyze with blob:", audioBlob.size);
-            onAnalyze(audioBlob);
+          if (audioBlob.size > 0) {
+            const audioUrl = URL.createObjectURL(audioBlob);
+            setAudioURL(audioUrl);
+            console.log("Audio URL created:", audioUrl);
+            
+            // Stop tracks after successful recording
+            if (streamRef.current) {
+              streamRef.current.getTracks().forEach(track => track.stop());
+              console.log("Media tracks stopped after successful recording");
+            }
+            
+            if (onAnalyze) {
+              console.log("Calling onAnalyze with blob:", audioBlob.size, "bytes");
+              onAnalyze(audioBlob);
+            }
+          } else {
+            const error = "Created audio blob is empty";
+            console.error(error);
+            setRecordingError(error);
+            toast.error("No audio data was recorded. Please try again.");
           }
         } else {
-          console.error("No audio data recorded");
+          const error = "No audio data recorded";
+          console.error(error);
+          setRecordingError(error);
           toast.error("No audio data was recorded. Please try again.");
         }
+        
+        setIsRecording(false);
       };
       
       // Start recording
-      mediaRecorderRef.current.start(100); // Collect data every 100ms
-      console.log("MediaRecorder started");
-      setIsRecording(true);
-      setAudioURL(null);
-      setRecordingDuration(0);
+      console.log("Starting MediaRecorder...");
+      mediaRecorderRef.current.start(100); // Collect data every 100ms for more consistent chunks
       
       // Start timer
       timerRef.current = window.setInterval(() => {
         setRecordingDuration(prev => prev + 1);
       }, 1000);
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error accessing microphone:', error);
-      setPermissionDenied(true);
-      toast.error('Could not access microphone. Please check permissions and try again.');
+      
+      let errorMessage = "Could not access microphone.";
+      
+      if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+        errorMessage = "Microphone access was denied. Please allow microphone access and try again.";
+        setPermissionDenied(true);
+      } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+        errorMessage = "No microphone was found on your device.";
+      } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+        errorMessage = "Your microphone is being used by another application.";
+      } else if (error.name === 'OverconstrainedError') {
+        errorMessage = "Microphone constraints cannot be satisfied.";
+      } else if (error.name === 'TypeError') {
+        errorMessage = "Audio is not supported on this device or browser.";
+      }
+      
+      setRecordingError(errorMessage);
+      toast.error(errorMessage);
+      
+      // Clean up if there was an error
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+      }
     }
   };
   
@@ -172,23 +316,27 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
       }
     }
     
-    return 'audio/webm'; // Fallback
+    return ''; // Return empty string to let browser choose default
   };
   
   const stopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
       console.log("Stopping recording...");
       try {
-        // Ensure we're collecting any final chunks
-        mediaRecorderRef.current.requestData();
-        // Stop the recorder
-        mediaRecorderRef.current.stop();
-        console.log("MediaRecorder stopped");
+        // Only call requestData if state is recording/paused
+        if (mediaRecorderRef.current.state !== 'inactive') {
+          console.log("Requesting final data chunk");
+          mediaRecorderRef.current.requestData();
+          console.log("Stopping MediaRecorder");
+          mediaRecorderRef.current.stop();
+        } else {
+          console.log("MediaRecorder already inactive, not stopping");
+        }
       } catch (err) {
         console.error("Error stopping MediaRecorder:", err);
+        setRecordingError("Error stopping recording");
+        toast.error("Error stopping recording");
       }
-      
-      setIsRecording(false);
       
       if (timerRef.current) {
         window.clearInterval(timerRef.current);
@@ -196,9 +344,13 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
       }
       
       if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
+        window.cancelAnimationFrame(animationFrameRef.current);
         animationFrameRef.current = null;
       }
+      
+      setIsRecording(false);
+    } else {
+      console.warn("Cannot stop recording: either not recording or no MediaRecorder");
     }
   };
   
@@ -244,6 +396,12 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
           ) 
           : (audioURL ? 'Recording Complete' : 'Ready to Record')}
       </div>
+      
+      {recordingError && (
+        <div className="text-red-500 mb-4 text-center">
+          {recordingError}
+        </div>
+      )}
       
       <div className="flex gap-4 mb-6">
         {!isRecording && !audioURL && (
